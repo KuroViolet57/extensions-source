@@ -3,10 +3,46 @@ package eu.kanade.tachiyomi.extension.en.aquamanga
 import android.util.Base64
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import okhttp3.Headers
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
+import java.io.IOException
 import kotlin.random.Random
 
 class AquaManga : Madara("Aqua Manga", "https://aquareader.org", "en") {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
+
+    // The site is fronted by a Cloudflare "Just a moment..." JavaScript challenge.
+    // When the challenge page is returned instead of real content, the Madara
+    // parsers dereference selectors that are now missing (e.g.
+    // selectFirst(mangaDetailsSelectorTitle)!!), which surfaces as the opaque
+    // "Attempt to invoke virtual method 'java.lang.Class
+    // java.lang.Object.getClass()' on a null object reference" NullPointerException.
+    //
+    // The challenge cannot be solved from okhttp; it requires the app's WebView.
+    // This interceptor turns the silent block into an actionable message so the
+    // user knows to open the source in WebView to obtain Cloudflare clearance.
+    override val client: OkHttpClient = network.client.newBuilder()
+        .addInterceptor(::cloudflareGuard)
+        .build()
+
+    private fun cloudflareGuard(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        val challenged = response.code in CLOUDFLARE_CODES &&
+            response.header("Server").orEmpty().contains("cloudflare", ignoreCase = true) &&
+            (
+                response.header("cf-mitigated").equals("challenge", ignoreCase = true) ||
+                    response.header("cf-ray") != null
+                )
+        if (challenged) {
+            response.close()
+            throw IOException(
+                "Aqua Manga is protected by a Cloudflare challenge. Open the source " +
+                    "in WebView to solve it, then try again.",
+            )
+        }
+        return response
+    }
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
@@ -18,7 +54,7 @@ class AquaManga : Madara("Aqua Manga", "https://aquareader.org", "en") {
         .add("Upgrade-Insecure-Requests", "1")
         .add("X-Requested-With", randomValue)
 
-    private val littleBitCursedEncodedValue = "ICAgSUFBZ0FFa0FRd0JCQUdjQVNRQkRBRUVBWndCUkFGVUFUZ0JDQUZFQVZRQnNBRUlBVVFCWEFHUUFRZ0JSQURBQVJnQkNBRk1BVlFCR0FFSUFXZ0F3QUVZQVJBQlJBRlVBUmdCVUFGVUFWUUJLQUVVQVVRQlZBRllBUmdCUkFGWUFjQUF6QUZFQWF3QndBRUlBVWdCVkFERUFRZ0JWQUZZQVJnQkRBR0lBYXdCR0FFWUFZUUF3QUVZQVVnQmtBREFBU2dCREFGRUFWUUJrQUdvQVVRQldBRTRBVWdCUkFHc0FVZ0JDQUZJQVZRQnNBRUlBVlFBeUFHUUFRd0JWQUdzQVJnQkhBRllBVlFCR0FGTUFXZ0F3QUVvQU1RQlJBRlVBV2dCR0FGRUFWZ0JhQUZJQVVRQnJBRGtBUWdCU0FGVUFiQUJ" +
+    private val littleBitCursedEncodedValue = "ICAgSUFBZ0FFa0FRd0JCQUdjQVNRQkRBRUVBWndCUkFGVUFUZ0JDQUZFQVZRQnNBRUlBVVFCWEFHUUFRZ0JSQURBQVJnQkNBRk1BVlFCR0FFSUFXZ0F3QUVZQVJBQlJBRlVBUmdCVUFGVUFWUUJLQUVVQVVRQlZBRllBUmdCUkFGWUFjQUF6QUZFQWF3QndBRUlBVWdCVkFERUFRZ0JWQUZZQVJnQkRBR0lBYXdCR0FFSUFZUUF3QUVZQVVnQmtBREFBU2dCREFGRUFWUUJrQUdvQVVRQldBRTRBVWdCUkFHc0FVZ0JDQUZJQVZRQnNBRUlBVlFBeUFHUUFRd0JWQUdzQVJnQkhBRllBVlFCR0FGTUFXZ0F3QUVvQU1RQlJBRlVBV2dCR0FGRUFWZ0JhQUZJQVVRQnJBRGtBUWdCU0FGVUFiQUJ" +
         "DQUZZQVZnQkdBRU1BVmdBd0FFWUFSZ0JPQUVVQVJnQldBRm9BTUFCS0FGTUFVUUJWQUdRQWVnQlJBRllBVmdCdUFGRUFhd0JPQUVJQVVnQnJBR3dBUWdCV0FHd0FSZ0JEQUZZQU1BQkdBRVlBVXdCVkFFWUFWd0JrQURBQVNnQXhBRkVBVlFCa0FGSUFVUUJXQUVZQU13QlJBR3dBVWdCQ0FGSUFNd0JPQUVJQVZRQnRBR1FBUXdCU0FEQUFSZ0JIQUZVQVZRQkdBRmNBVlFCVkFFb0FTQUJSQUZVQVdnQktBRkVBVmdCYUFGSUFVUUJzQUZvQVFnQlNBRmNBT1FCQ0FGb0FSZ0JHQUVNQVZRQnJBRVlBUndCV0FGVUFSZ0JYQUZvQU1BQktBRFVBVVFCVkFGb0FSZ0JSQUZZQVdnQnVBRkVBYXdCa0FFSUFVZ0JGQURFQVFnQldBRllB" +
         "UmdCREFHTUFhd0JHQUVZQVlnQXdBRVlBVWdCYUFEQUFTZ0JVQUZFQVZRQlNBRW9BVVFCV0FGSUFiZ0JSQUdzQVRnQkNBRklBYkFCc0FFSUFWQUJXQUVZQVF3QlNBREFBUmdCR0FGTUFWUUJHQUdFQVZRQlZBRW9BVndCUkFGVUFWZ0JhQUZFQVZnQktBRklBVVFCdEFHZ0FRZ0JTQUVVQVJnQkNBRlVBYlFCa0FFTUFZd0JyQUVZQVJ3QlNBRlVBUmdCWEFGVUFWUUJLQUV3QVVRQlZBRlVBTUFCUkFGWUFWZ0JTQUZFQWJBQmFBRUlBVWdBd0FERUFRZ0JhQUVnQVpBQkRBRlVBYXdCR0FFY0FWd0JWQUVZQVZBQmFBREFBU2dBeEFGRUFWUUJhQUVZQVVRQlhBRVlBYmdCUkFHc0FaQUJDQUZJQVZRQnNBRUlBVmdCWEFHUUFRd0Jr" +
         "QUVVQVJnQkZBR0VBTUFCR0FGSUFXZ0F3QUVvQVZ3QlJBRlVBVWdCQ0FGRUFWZ0JLQUc0QVVRQnJBRklBUWdCU0FHc0FNUUJDQUZRQVZRQkdBRU1BVWdBd0FFWUFSZ0JoQURBQVJnQlhBR1FBTUFCS0FGY0FVUUJWQUZZQVdnQlJBRllBWkFCdUFGRUFiQUJhQUVJQVVnQnNBRllBUWdCVkFESUFaQUJEQUZjQWF3QkdBRWNBVWdCVkFFWUFWd0JWQUZVQVN" +
@@ -35,10 +71,6 @@ class AquaManga : Madara("Aqua Manga", "https://aquareader.org", "en") {
 
     private val chromiumBrowserValue = "org.chromium.chrome"
 
-    // Computed lazily so it is never read before initialization. Evaluating this
-    // eagerly during construction (e.g. when headersBuilder() runs while the
-    // superclass builds its headers) left the value null, surfacing as a
-    // NullPointerException ("getClass() on a null object reference").
     private val randomValue by lazy {
         val randomLength = Random.Default.nextInt(13, 21)
         val decodedString = Base64.decode(littleBitCursedEncodedValue, Base64.DEFAULT)
@@ -55,4 +87,8 @@ class AquaManga : Madara("Aqua Manga", "https://aquareader.org", "en") {
     }
 
     override val chapterUrlSuffix = ""
+
+    companion object {
+        private val CLOUDFLARE_CODES = setOf(403, 503)
+    }
 }

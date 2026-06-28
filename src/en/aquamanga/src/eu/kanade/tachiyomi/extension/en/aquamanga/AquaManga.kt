@@ -28,23 +28,30 @@ class AquaManga : Madara("Aqua Manga", "https://aquareader.org", "en") {
         "NEFVZ0JSQUdzQVNnQkNBRklBUkFCQ0FFSUFWUUJHQUVZQVFnQmFBREFBUmdCRUFGRUFWUUJHQUVvQVVRQlZBRVlBYmdCUkFGVUFUZ0JDQUZFQVZRQnNBRUlBVVFCWEFHTUFad0JKQUVNQVFRQm5BRWtBUXdCQkFEMEFJQUFnQUNBQUlBQT0gICA="
 
     private fun getRandomSubstring(input: String, length: Int): String {
-        val startIndex = (0 until input.length - length + 1).random()
+        if (input.length <= length) return input
+        val startIndex = (0..input.length - length).random()
         return input.substring(startIndex, startIndex + length)
     }
 
-    private val randomLength = Random.Default.nextInt(13, 21)
-
-    private val decodedString = Base64.decode(littleBitCursedEncodedValue, Base64.DEFAULT).toString(Charsets.UTF_8).trim()
-
-    private val randomStringValue = getRandomSubstring(decodedString, randomLength)
-
     private val chromiumBrowserValue = "org.chromium.chrome"
 
-    private val randomValue = when {
-        Random.nextInt(1, 11) == 1 -> chromiumBrowserValue
+    // Computed lazily so it is never read before initialization. Evaluating this
+    // eagerly during construction (e.g. when headersBuilder() runs while the
+    // superclass builds its headers) left the value null, surfacing as a
+    // NullPointerException ("getClass() on a null object reference").
+    private val randomValue by lazy {
+        val randomLength = Random.Default.nextInt(13, 21)
+        val decodedString = Base64.decode(littleBitCursedEncodedValue, Base64.DEFAULT)
+            .toString(Charsets.UTF_8)
+            .trim()
+        val randomStringValue = getRandomSubstring(decodedString, randomLength)
 
-        // 10% chance
-        else -> randomStringValue // 90% chance
+        when {
+            Random.nextInt(1, 11) == 1 -> chromiumBrowserValue
+
+            // 10% chance
+            else -> randomStringValue // 90% chance
+        }
     }
 
     override val chapterUrlSuffix = ""
